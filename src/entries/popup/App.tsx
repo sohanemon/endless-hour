@@ -1,8 +1,14 @@
 // popup/App.tsx
-import { useEffect, useState } from 'react';
+
+import { cn } from '@sohanemon/utils';
+import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { sendMessage } from '@/lib/messaging';
+import { resolveBypassCache } from '@/lib/reload-utils';
+import type { AutoReloadConfig } from '@/types/messages.types';
 
 function formatAgo(timestamp: number, now: number): string {
 	const seconds = Math.max(0, Math.floor((now - timestamp) / 1000));
@@ -16,20 +22,27 @@ function formatAgo(timestamp: number, now: number): string {
 export default function App() {
 	const [tabId, setTabId] = useState<number>();
 	const [min, setMin] = useState(30);
-	const [max, setMax] = useState(60);
+	const [max, setMax] = useState(150);
 	const [enabled, setEnabled] = useState(false);
+	const [bypassCache, setBypassCache] = useState(false);
 	const [lastReloadedAt, setLastReloadedAt] = useState<number>();
+	const [randomHardReload, setRandomHardReload] = useState(false);
 	const [now, setNow] = useState(Date.now());
 
-	const refresh = async (id: number) => {
-		const info = await sendMessage({ type: 'GET_AUTO_RELOAD', tabId: id });
-		if (info?.config) {
+	const refresh = useCallback(async (id: number) => {
+		const info = await sendMessage<'GET_AUTO_RELOAD'>({
+			type: 'GET_AUTO_RELOAD',
+			tabId: id,
+		});
+		if (info && 'ok' in info && info.config) {
 			setMin(info.config.min);
 			setMax(info.config.max);
 			setEnabled(info.config.enabled);
+			setBypassCache(info.config.bypassCache);
+			setRandomHardReload(info.config.randomHardReload);
 		}
-		setLastReloadedAt(info.lastReloadedAt);
-	};
+		setLastReloadedAt(info?.lastReloadedAt);
+	}, []);
 
 	useEffect(() => {
 		void (async () => {
@@ -41,32 +54,59 @@ export default function App() {
 			setTabId(tab.id);
 			await refresh(tab.id);
 		})();
-	}, []);
+	}, [refresh]);
 
-	// tick the "x ago" label every second
 	useEffect(() => {
 		const interval = setInterval(() => setNow(Date.now()), 1000);
 		return () => clearInterval(interval);
 	}, []);
 
 	const handleReload = async () => {
-		await sendMessage({ type: 'RELOAD_TAB' });
+		const effectiveBypassCache = resolveBypassCache({
+			bypassCache,
+			randomHardReload,
+		});
+		await sendMessage({
+			type: 'RELOAD_TAB',
+			bypassCache: effectiveBypassCache,
+		});
 		if (tabId != null) await refresh(tabId);
 	};
 
-	const handleToggleAutoReload = async () => {
+	const persistConfig = async (overrides: Partial<AutoReloadConfig> = {}) => {
 		if (tabId == null) return;
-		const nextEnabled = !enabled;
-		setEnabled(nextEnabled);
 		await sendMessage({
 			type: 'SET_AUTO_RELOAD',
 			tabId,
-			config: { min, max, enabled: nextEnabled },
+			config: {
+				min,
+				max,
+				enabled,
+				bypassCache,
+				randomHardReload,
+				...overrides,
+			},
 		});
 	};
 
+	const handleToggleAutoReload = async () => {
+		const nextEnabled = !enabled;
+		setEnabled(nextEnabled);
+		await persistConfig({ enabled: nextEnabled });
+	};
+
+	const handleToggleBypassCache = async (checked: boolean) => {
+		setBypassCache(checked);
+		await persistConfig({ bypassCache: checked });
+	};
+
+	const handleToggleRandomHardReload = async (checked: boolean) => {
+		setRandomHardReload(checked);
+		await persistConfig({ randomHardReload: checked });
+	};
+
 	return (
-		<main className="flex flex-col gap-6 p-5">
+		<main className="flex dark flex-col bg-background text-foreground gap-6 p-5">
 			<div className="flex flex-col gap-1">
 				<h1 className="text-3xl font-extrabold">Endless Hour</h1>
 				<p className="text-xs text-muted-foreground">
@@ -76,7 +116,40 @@ export default function App() {
 				</p>
 			</div>
 
-			<Button onClick={handleReload}>Reload</Button>
+			<div className="flex flex-col gap-2">
+				<Button onClick={handleReload}>Reload</Button>
+				<div className="flex items-center gap-2">
+					<Checkbox
+						id="bypass-cache"
+						checked={randomHardReload || bypassCache}
+						disabled={randomHardReload}
+						onCheckedChange={(checked) =>
+							handleToggleBypassCache(checked === true)
+						}
+					/>
+					<Label
+						htmlFor="bypass-cache"
+						className={cn(
+							'text-xs font-normal',
+							randomHardReload && 'text-muted-foreground',
+						)}
+					>
+						Hard reload (bypass cache)
+					</Label>
+				</div>
+				<div className="flex items-center gap-2">
+					<Checkbox
+						id="random-hard-reload"
+						checked={randomHardReload}
+						onCheckedChange={(checked) =>
+							handleToggleRandomHardReload(checked === true)
+						}
+					/>
+					<Label htmlFor="random-hard-reload" className="text-xs font-normal">
+						Randomize cache behavior
+					</Label>
+				</div>
+			</div>
 
 			<div className="flex flex-col gap-2">
 				<p className="text-xs font-medium">Random auto-reload (seconds)</p>

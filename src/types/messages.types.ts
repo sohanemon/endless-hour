@@ -2,6 +2,8 @@ export interface AutoReloadConfig {
 	min: number;
 	max: number;
 	enabled: boolean;
+	bypassCache: boolean;
+	randomHardReload: boolean;
 }
 
 export interface MessageMap {
@@ -25,5 +27,8 @@ export interface ResponseMap {
 	GET_TABS: { tabs: chrome.tabs.Tab[] };
 	RELOAD_TAB: { ok: boolean };
 	SET_AUTO_RELOAD: { ok: boolean };
-	GET_AUTO_RELOAD: { config: AutoReloadConfig | undefined };
+	GET_AUTO_RELOAD: {
+		config: AutoReloadConfig | undefined;
+		lastReloadedAt: number | undefined;
+	};
 }

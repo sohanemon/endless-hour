@@ -1,3 +1,4 @@
+import { resolveBypassCache } from '@/lib/reload-utils.ts';
 import {
 	clearAutoReloadConfig,
 	getAutoReloadConfig,
@@ -36,7 +37,6 @@ onMessage(async (message) => {
 			await reloadAndStamp(tabId, message.bypassCache ?? false);
 		return { ok: tabId != null };
 	}
-
 	if (message.type === 'SET_AUTO_RELOAD') {
 		const { tabId, config } = message;
 		await setAutoReloadConfig(tabId, config);
@@ -44,13 +44,11 @@ onMessage(async (message) => {
 		if (config.enabled) await scheduleNext(tabId, config);
 		return { ok: true };
 	}
-
 	if (message.type === 'GET_AUTO_RELOAD') {
 		const config = await getAutoReloadConfig(message.tabId);
 		const lastReloadedAt = await getLastReloadedAt(message.tabId);
 		return { config, lastReloadedAt };
 	}
-
 	return undefined;
 });
 
@@ -59,9 +57,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 	const tabId = tabIdFromAlarm(alarm.name);
 	const config = await getAutoReloadConfig(tabId);
 	if (!config?.enabled) return;
-
 	try {
-		await reloadAndStamp(tabId);
+		await reloadAndStamp(tabId, resolveBypassCache(config));
 	} catch {
 		await clearAutoReloadConfig(tabId);
 		return;
