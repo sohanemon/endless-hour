@@ -1,27 +1,16 @@
-function randomBetween(min: number, max: number): number {
+// INFO: DOM-simulation primitives for the "Behavior" popup tab.
+// Timing is owned by the background (chrome.alarms), mirroring the reloader:
+// each alarm tick dispatches a `RUN_BEHAVIOR_ACTION` message here, which
+// performs a single randomized human-like action from the enabled set.
+
+let lastMouseX = window.innerWidth / 2;
+let lastMouseY = window.innerHeight / 2;
+
+export function randomBetween(min: number, max: number): number {
 	return Math.random() * (max - min) + min;
 }
 
-let pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
-
-function trackedTimeout(
-	fn: () => void,
-	delay: number,
-): ReturnType<typeof setTimeout> {
-	const id = setTimeout(() => {
-		pendingTimeouts = pendingTimeouts.filter((t) => t !== id);
-		fn();
-	}, delay);
-	pendingTimeouts.push(id);
-	return id;
-}
-
-function clearPendingTimeouts(): void {
-	pendingTimeouts.forEach(clearTimeout);
-	pendingTimeouts = [];
-}
-
-function humanScroll(targetY: number): void {
+export function humanScroll(targetY: number): void {
 	const startY = window.scrollY;
 	const maxY = document.documentElement.scrollHeight - window.innerHeight;
 	const clampedTarget = Math.max(0, Math.min(targetY, maxY));
@@ -46,17 +35,17 @@ function humanScroll(targetY: number): void {
 	}, duration / steps);
 }
 
-function moveMouseTo(
+export function moveMouseTo(
 	targetX: number,
 	targetY: number,
 	onArrive?: () => void,
 ): void {
-	const startX = window.lastMouseX ?? window.innerWidth / 2;
-	const startY = window.lastMouseY ?? window.innerHeight / 2;
+	const startX = lastMouseX;
+	const startY = lastMouseY;
 	const steps = 10;
 
 	for (let i = 0; i <= steps; i++) {
-		trackedTimeout(() => {
+		setTimeout(() => {
 			const progress = i / steps;
 			const currentX = startX + (targetX - startX) * progress;
 			const currentY = startY + (targetY - startY) * progress;
@@ -70,15 +59,15 @@ function moveMouseTo(
 					clientY: currentY,
 				}),
 			);
-			window.lastMouseX = currentX;
-			window.lastMouseY = currentY;
+			lastMouseX = currentX;
+			lastMouseY = currentY;
 
 			if (i === steps) onArrive?.();
 		}, i * 20);
 	}
 }
 
-function humanHover(element: Element): void {
+export function humanHover(element: Element): void {
 	const rect = element.getBoundingClientRect();
 	const targetX = rect.left + rect.width / 2 + randomBetween(-5, 5);
 	const targetY = rect.top + rect.height / 2 + randomBetween(-5, 5);
@@ -89,7 +78,7 @@ function humanHover(element: Element): void {
 	});
 }
 
-function humanClick(element: Element): void {
+export function humanClick(element: Element): void {
 	const rect = element.getBoundingClientRect();
 	const targetX = rect.left + rect.width / 2 + randomBetween(-5, 5);
 	const targetY = rect.top + rect.height / 2 + randomBetween(-5, 5);
@@ -98,7 +87,7 @@ function humanClick(element: Element): void {
 		element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
 		element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
 
-		trackedTimeout(
+		setTimeout(
 			() => {
 				element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
 				element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
@@ -118,7 +107,7 @@ const UNSAFE_SELECTOR = [
 	'.delete, .logout, .signout',
 ].join(', ');
 
-function safeInteractiveElements(selector: string): Element[] {
+export function safeInteractiveElements(selector: string): Element[] {
 	return Array.from(document.querySelectorAll(selector)).filter((el) => {
 		if (el.matches(UNSAFE_SELECTOR)) return false;
 		const rect = el.getBoundingClientRect();
@@ -131,43 +120,26 @@ function safeInteractiveElements(selector: string): Element[] {
 	});
 }
 
-type BehaviorAction = () => void;
+export type BehaviorAction = 'scroll' | 'hover' | 'click';
 
-let scheduleTimeout: ReturnType<typeof setTimeout> | undefined;
-let running = false;
+export function runBehaviorAction(actions: BehaviorAction[]): void {
+	if (actions.length === 0) return;
 
-function runRandomAction(): void {
-	if (!running) return;
+	const action = actions[Math.floor(Math.random() * actions.length)];
 
-	const actions: BehaviorAction[] = [
-		() => humanScroll(window.scrollY + randomBetween(100, 500)),
-		() => {
+	switch (action) {
+		case 'scroll':
+			humanScroll(window.scrollY + randomBetween(100, 500));
+			break;
+		case 'click': {
 			const els = safeInteractiveElements('button, a[href], [role="button"]');
 			if (els.length) humanClick(els[Math.floor(Math.random() * els.length)]);
-		},
-		() => {
+			break;
+		}
+		case 'hover': {
 			const els = safeInteractiveElements('button, a, input');
 			if (els.length) humanHover(els[Math.floor(Math.random() * els.length)]);
-		},
-	];
-
-	actions[Math.floor(Math.random() * actions.length)]();
-	scheduleTimeout = trackedTimeout(runRandomAction, randomBetween(2000, 8000));
+			break;
+		}
+	}
 }
-
-function startAutomatedBehavior(): void {
-	if (running) return;
-	running = true;
-	runRandomAction();
-}
-
-function stopAutomatedBehavior(): void {
-	running = false;
-	if (scheduleTimeout) clearTimeout(scheduleTimeout);
-	clearPendingTimeouts();
-}
-
-chrome.runtime.onMessage.addListener((message: { type: string }) => {
-	if (message.type === 'ENDLESS_HOUR_START') startAutomatedBehavior();
-	if (message.type === 'ENDLESS_HOUR_STOP') stopAutomatedBehavior();
-});
