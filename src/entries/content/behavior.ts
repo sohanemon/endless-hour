@@ -128,9 +128,26 @@ export function runBehaviorAction(actions: BehaviorAction[]): void {
 	const action = actions[Math.floor(Math.random() * actions.length)];
 
 	switch (action) {
-		case 'scroll':
-			humanScroll(window.scrollY + randomBetween(100, 500));
+		case 'scroll': {
+			const delta = randomBetween(100, 500);
+			const maxY = document.documentElement.scrollHeight - window.innerHeight;
+			const currentY = window.scrollY;
+
+			// Near top edge with room to go down → scroll down.
+			// Near bottom edge with room to go up → scroll up.
+			// Otherwise pick a random direction.
+			let direction: number;
+			if (currentY < delta && maxY - currentY > delta) {
+				direction = 1;
+			} else if (maxY - currentY < delta && currentY > delta) {
+				direction = -1;
+			} else {
+				direction = Math.random() < 0.5 ? -1 : 1;
+			}
+
+			humanScroll(currentY + direction * delta);
 			break;
+		}
 		case 'click': {
 			const els = safeInteractiveElements('button, a[href], [role="button"]');
 			if (els.length) humanClick(els[Math.floor(Math.random() * els.length)]);
