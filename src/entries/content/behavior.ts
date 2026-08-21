@@ -67,7 +67,23 @@ export function moveMouseTo(
 	}
 }
 
-export function humanHover(element: Element): void {
+let activeHover:
+	| { element: Element; timeoutId: ReturnType<typeof setTimeout> }
+	| undefined;
+
+export function humanHover(element: Element, onDone?: () => void): void {
+	// If a hover is already in progress, end it immediately before starting the new one.
+	if (activeHover) {
+		clearTimeout(activeHover.timeoutId);
+		activeHover.element.dispatchEvent(
+			new MouseEvent('mouseout', { bubbles: true }),
+		);
+		activeHover.element.dispatchEvent(
+			new MouseEvent('mouseleave', { bubbles: true }),
+		);
+		activeHover = undefined;
+	}
+
 	const rect = element.getBoundingClientRect();
 	const targetX = rect.left + rect.width / 2 + randomBetween(-5, 5);
 	const targetY = rect.top + rect.height / 2 + randomBetween(-5, 5);
@@ -75,6 +91,16 @@ export function humanHover(element: Element): void {
 	moveMouseTo(targetX, targetY, () => {
 		element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
 		element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+
+		const dwellMs = randomBetween(400, 1200);
+		const timeoutId = setTimeout(() => {
+			element.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+			element.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+			if (activeHover?.element === element) activeHover = undefined;
+			onDone?.();
+		}, dwellMs);
+
+		activeHover = { element, timeoutId };
 	});
 }
 

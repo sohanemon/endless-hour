@@ -117,13 +117,22 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 		if (!config?.enabled) return;
 
 		const actions = enabledActions(config);
-		if (actions.length === 0) return;
+		if (actions.length === 0) {
+			await scheduleNextBehavior(tabId, config);
+			return;
+		}
 
 		try {
 			await sendTabMessage(tabId, { type: 'RUN_BEHAVIOR_ACTION', actions });
 		} catch {
-			await clearBehaviorConfig(tabId);
-			return;
+			const tabStillExists = await chrome.tabs
+				.get(tabId)
+				.then(() => true)
+				.catch(() => false);
+			if (!tabStillExists) {
+				await clearBehaviorConfig(tabId);
+				return;
+			}
 		}
 		await scheduleNextBehavior(tabId, config);
 	}
