@@ -1,5 +1,6 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Reloader from '@/entries/popup/_components/reloader';
+import Behavior from './_components/behavior';
 
 export default function App() {
 	return (
@@ -13,6 +14,9 @@ export default function App() {
 				</TabsList>
 				<TabsContent value="reloader" className="w-full">
 					<Reloader />
+				</TabsContent>
+				<TabsContent value="behavior" className="w-full">
+					<Behavior />
 				</TabsContent>
 			</Tabs>
 		</main>

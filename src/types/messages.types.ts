@@ -6,6 +6,15 @@ export interface AutoReloadConfig {
 	randomHardReload: boolean;
 }
 
+export interface BehaviorConfig {
+	enabled: boolean;
+	min: number; // seconds between actions
+	max: number;
+	scroll: boolean;
+	hover: boolean;
+	click: boolean;
+}
+
 export interface MessageMap {
 	COUNT: { type: 'COUNT'; count: number };
 	GET_TABS: { type: 'GET_TABS' };
@@ -16,6 +25,12 @@ export interface MessageMap {
 		config: AutoReloadConfig;
 	};
 	GET_AUTO_RELOAD: { type: 'GET_AUTO_RELOAD'; tabId: number };
+	SET_BEHAVIOR: { type: 'SET_BEHAVIOR'; tabId: number; config: BehaviorConfig };
+	GET_BEHAVIOR: { type: 'GET_BEHAVIOR'; tabId: number };
+	RUN_BEHAVIOR_ACTION: {
+		type: 'RUN_BEHAVIOR_ACTION';
+		actions: Array<'scroll' | 'hover' | 'click'>;
+	};
 }
 export type MessageType = keyof MessageMap;
 export type Message<T extends MessageType> = MessageMap[T];
@@ -31,4 +46,7 @@ export interface ResponseMap {
 		config: AutoReloadConfig | undefined;
 		lastReloadedAt: number | undefined;
 	};
+	SET_BEHAVIOR: { ok: boolean };
+	GET_BEHAVIOR: { config: BehaviorConfig | undefined };
+	RUN_BEHAVIOR_ACTION: { ok: boolean };
 }
