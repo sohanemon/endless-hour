@@ -13,6 +13,7 @@ export interface BehaviorConfig {
 	scroll: boolean;
 	hover: boolean;
 	click: boolean;
+	clickSelectors: string[];
 }
 
 export interface MessageMap {
@@ -21,15 +22,20 @@ export interface MessageMap {
 	RELOAD_TAB: { type: 'RELOAD_TAB'; tabId?: number; bypassCache?: boolean };
 	SET_AUTO_RELOAD: {
 		type: 'SET_AUTO_RELOAD';
-		tabId: number;
+		urlKey: string;
 		config: AutoReloadConfig;
 	};
-	GET_AUTO_RELOAD: { type: 'GET_AUTO_RELOAD'; tabId: number };
-	SET_BEHAVIOR: { type: 'SET_BEHAVIOR'; tabId: number; config: BehaviorConfig };
-	GET_BEHAVIOR: { type: 'GET_BEHAVIOR'; tabId: number };
+	GET_AUTO_RELOAD: { type: 'GET_AUTO_RELOAD'; urlKey: string };
+	SET_BEHAVIOR: {
+		type: 'SET_BEHAVIOR';
+		urlKey: string;
+		config: BehaviorConfig;
+	};
+	GET_BEHAVIOR: { type: 'GET_BEHAVIOR'; urlKey: string };
 	RUN_BEHAVIOR_ACTION: {
 		type: 'RUN_BEHAVIOR_ACTION';
 		actions: Array<'scroll' | 'hover' | 'click'>;
+		clickSelectors: string[];
 	};
 }
 export type MessageType = keyof MessageMap;

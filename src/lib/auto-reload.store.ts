@@ -1,36 +1,50 @@
 import type { AutoReloadConfig } from '../types/messages.types';
 
-const configKey = (tabId: number) => `autoReload:${tabId}`;
-const lastReloadKey = (tabId: number) => `lastReloadedAt:${tabId}`;
+const configKey = (urlKey: string) => `autoReload:${urlKey}`;
+const lastReloadKey = (urlKey: string) => `lastReloadedAt:${urlKey}`;
 
 export async function getAutoReloadConfig(
-	tabId: number,
+	urlKey: string,
 ): Promise<AutoReloadConfig | undefined> {
-	const result = await chrome.storage.local.get(configKey(tabId));
-	return result[configKey(tabId)] as AutoReloadConfig | undefined;
+	const result = await chrome.storage.local.get(configKey(urlKey));
+	return result[configKey(urlKey)] as AutoReloadConfig | undefined;
 }
 
 export async function setAutoReloadConfig(
-	tabId: number,
+	urlKey: string,
 	config: AutoReloadConfig,
 ): Promise<void> {
-	await chrome.storage.local.set({ [configKey(tabId)]: config });
+	await chrome.storage.local.set({ [configKey(urlKey)]: config });
 }
 
-export async function clearAutoReloadConfig(tabId: number): Promise<void> {
-	await chrome.storage.local.remove(configKey(tabId));
+export async function clearAutoReloadConfig(urlKey: string): Promise<void> {
+	await chrome.storage.local.remove(configKey(urlKey));
 }
 
 export async function getLastReloadedAt(
-	tabId: number,
+	urlKey: string,
 ): Promise<number | undefined> {
-	const result = await chrome.storage.local.get(lastReloadKey(tabId));
-	return result[lastReloadKey(tabId)] as number | undefined;
+	const result = await chrome.storage.local.get(lastReloadKey(urlKey));
+	return result[lastReloadKey(urlKey)] as number | undefined;
 }
 
 export async function setLastReloadedAt(
-	tabId: number,
+	urlKey: string,
 	timestamp: number,
 ): Promise<void> {
-	await chrome.storage.local.set({ [lastReloadKey(tabId)]: timestamp });
+	await chrome.storage.local.set({ [lastReloadKey(urlKey)]: timestamp });
+}
+
+// INFO: Returns every stored autoReload config, keyed by urlKey. Used by the
+// background alarm tick to drive all matching tabs for all enabled URLs.
+export async function getAllAutoReloadConfigs(): Promise<
+	Array<{ urlKey: string; config: AutoReloadConfig }>
+> {
+	const all = await chrome.storage.local.get(null);
+	return Object.entries(all)
+		.filter(([key]) => key.startsWith('autoReload:'))
+		.map(([key, value]) => ({
+			urlKey: key.slice('autoReload:'.length),
+			config: value as AutoReloadConfig,
+		}));
 }

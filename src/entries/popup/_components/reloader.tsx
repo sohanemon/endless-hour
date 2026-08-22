@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { sendMessage } from '@/lib/messaging';
 import { resolveBypassCache } from '@/lib/reload-utils';
+import { tabsForUrlKey } from '@/lib/url-utils';
 import { cn } from '@/lib/utils';
 import type { AutoReloadConfig } from '@/types/messages.types';
 
@@ -25,32 +26,29 @@ function formatAgo(timestamp: number, now: number): string {
 	return `${hours}h ${minutes % 60}m ago`;
 }
 
-export default function Reloader() {
-	const [tabId, setTabId] = useState<number>();
+interface ReloaderProps {
+	urlKey: string | undefined;
+}
+
+export default function Reloader({ urlKey }: ReloaderProps) {
 	const [config, setConfig] = useState<AutoReloadConfig>(DEFAULT_CONFIG);
 	const [lastReloadedAt, setLastReloadedAt] = useState<number>();
 	const [now, setNow] = useState(Date.now());
 
-	const refresh = useCallback(async (id: number) => {
+	const refresh = useCallback(async (key: string) => {
 		const info = await sendMessage<'GET_AUTO_RELOAD'>({
 			type: 'GET_AUTO_RELOAD',
-			tabId: id,
+			urlKey: key,
 		});
 		if (info?.config) setConfig(info.config);
+		else setConfig(DEFAULT_CONFIG);
 		setLastReloadedAt(info?.lastReloadedAt);
 	}, []);
 
 	useEffect(() => {
-		void (async () => {
-			const [tab] = await chrome.tabs.query({
-				active: true,
-				currentWindow: true,
-			});
-			if (!tab?.id) return;
-			setTabId(tab.id);
-			await refresh(tab.id);
-		})();
-	}, [refresh]);
+		if (urlKey == null) return;
+		void refresh(urlKey);
+	}, [urlKey, refresh]);
 
 	useEffect(() => {
 		const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -58,27 +56,40 @@ export default function Reloader() {
 	}, []);
 
 	const reload = useCallback(async () => {
+		if (urlKey == null) return;
 		const effectiveBypassCache = resolveBypassCache(config);
-		await sendMessage<'RELOAD_TAB'>({
-			type: 'RELOAD_TAB',
-			bypassCache: effectiveBypassCache,
-		});
-		if (tabId != null) await refresh(tabId);
-	}, [config, tabId, refresh]);
+		const tabIds = await tabsForUrlKey(urlKey);
+		for (const tabId of tabIds) {
+			await sendMessage<'RELOAD_TAB'>({
+				type: 'RELOAD_TAB',
+				tabId,
+				bypassCache: effectiveBypassCache,
+			});
+		}
+		await refresh(urlKey);
+	}, [config, urlKey, refresh]);
 
 	const updateConfig = useCallback(
 		async (partial: Partial<AutoReloadConfig> = {}) => {
-			if (tabId == null) return;
+			if (urlKey == null) return;
 			const next = { ...config, ...partial };
 			setConfig(next);
 			await sendMessage<'SET_AUTO_RELOAD'>({
 				type: 'SET_AUTO_RELOAD',
-				tabId,
+				urlKey,
 				config: next,
 			});
 		},
-		[tabId, config],
+		[urlKey, config],
 	);
+
+	if (urlKey == null) {
+		return (
+			<p className="text-xs text-muted-foreground">
+				Add or select a target URL above to configure auto-reload.
+			</p>
+		);
+	}
 
 	return (
 		<div className="flex flex-col gap-6">
