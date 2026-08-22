@@ -148,7 +148,10 @@ export function safeInteractiveElements(selector: string): Element[] {
 
 export type BehaviorAction = 'scroll' | 'hover' | 'click';
 
-export function runBehaviorAction(actions: BehaviorAction[]): void {
+export function runBehaviorAction(
+	actions: BehaviorAction[],
+	clickSelectors: string[] = [],
+): void {
 	if (actions.length === 0) return;
 
 	const action = actions[Math.floor(Math.random() * actions.length)];
@@ -175,8 +178,19 @@ export function runBehaviorAction(actions: BehaviorAction[]): void {
 			break;
 		}
 		case 'click': {
-			const els = safeInteractiveElements('button, a[href], [role="button"]');
-			if (els.length) humanClick(els[Math.floor(Math.random() * els.length)]);
+			const customEls = clickSelectors.flatMap((sel) => {
+				try {
+					return safeInteractiveElements(sel);
+				} catch {
+					return [];
+				}
+			});
+			const defaultEls = safeInteractiveElements(
+				'button, a[href], [role="button"]',
+			);
+			const pool = customEls.length > 0 ? customEls : defaultEls;
+			if (pool.length)
+				humanClick(pool[Math.floor(Math.random() * pool.length)]);
 			break;
 		}
 		case 'hover': {

@@ -1,4 +1,4 @@
-import { resolveBypassCache } from '@/lib/reload-utils.ts';
+import { resolveBypassCache } from '../../lib/reload-utils.ts';
 import {
 	clearAutoReloadConfig,
 	getAutoReloadConfig,
@@ -12,33 +12,35 @@ import {
 	setBehaviorConfig,
 } from '../../lib/behavior.store.ts';
 import { onMessage, sendTabMessage } from '../../lib/messaging';
+import { tabsForUrlKey } from '../../lib/url-utils';
 import type { BehaviorConfig } from '../../types/messages.types';
 
-// --- Reload alarms ---
-const alarmName = (tabId: number) => `autoReload:${tabId}`;
-const tabIdFromAlarm = (name: string) => Number(name.split(':')[1]);
-
-// --- Behavior alarms ---
-const behaviorAlarmName = (tabId: number) => `behavior:${tabId}`;
-const tabIdFromBehaviorAlarm = (name: string) => Number(name.split(':')[1]);
+// --- URL-keyed alarms ---
+// One alarm per URL key per feature. On each tick the background resolves
+// every open tab whose normalized URL matches and drives them all.
+const autoReloadAlarmName = (urlKey: string) => `autoReload:${urlKey}`;
+const behaviorAlarmName = (urlKey: string) => `behavior:${urlKey}`;
 
 function randomDelaySeconds(min: number, max: number): number {
 	return Math.random() * (max - min) + min;
 }
 
 async function scheduleNext(
-	tabId: number,
+	urlKey: string,
 	config: { min: number; max: number },
-) {
+): Promise<void> {
 	const delaySeconds = randomDelaySeconds(config.min, config.max);
-	await chrome.alarms.create(alarmName(tabId), {
+	await chrome.alarms.create(autoReloadAlarmName(urlKey), {
 		delayInMinutes: delaySeconds / 60,
 	});
 }
 
-async function scheduleNextBehavior(tabId: number, config: BehaviorConfig) {
+async function scheduleNextBehavior(
+	urlKey: string,
+	config: BehaviorConfig,
+): Promise<void> {
 	const delaySeconds = randomDelaySeconds(config.min, config.max);
-	await chrome.alarms.create(behaviorAlarmName(tabId), {
+	await chrome.alarms.create(behaviorAlarmName(urlKey), {
 		delayInMinutes: delaySeconds / 60,
 	});
 }
@@ -53,43 +55,50 @@ function enabledActions(
 	return actions;
 }
 
-async function reloadAndStamp(tabId: number, bypassCache = false) {
+async function reloadAndStamp(
+	urlKey: string,
+	tabId: number,
+	bypassCache: boolean,
+): Promise<void> {
 	await chrome.tabs.reload(tabId, { bypassCache });
-	await setLastReloadedAt(tabId, Date.now());
+	await setLastReloadedAt(urlKey, Date.now());
 }
 
 onMessage(async (message) => {
 	if (message.type === 'RELOAD_TAB') {
-		const tabId = message.tabId ?? (await getActiveTabId());
-		if (tabId != null)
-			await reloadAndStamp(tabId, message.bypassCache ?? false);
-		return { ok: tabId != null };
+		if (message.tabId != null) {
+			await chrome.tabs.reload(message.tabId, {
+				bypassCache: message.bypassCache ?? false,
+			});
+			return { ok: true };
+		}
+		return { ok: false };
 	}
 
 	if (message.type === 'SET_AUTO_RELOAD') {
-		const { tabId, config } = message;
-		await setAutoReloadConfig(tabId, config);
-		await chrome.alarms.clear(alarmName(tabId));
-		if (config.enabled) await scheduleNext(tabId, config);
+		const { urlKey, config } = message;
+		await setAutoReloadConfig(urlKey, config);
+		await chrome.alarms.clear(autoReloadAlarmName(urlKey));
+		if (config.enabled) await scheduleNext(urlKey, config);
 		return { ok: true };
 	}
 
 	if (message.type === 'GET_AUTO_RELOAD') {
-		const config = await getAutoReloadConfig(message.tabId);
-		const lastReloadedAt = await getLastReloadedAt(message.tabId);
+		const config = await getAutoReloadConfig(message.urlKey);
+		const lastReloadedAt = await getLastReloadedAt(message.urlKey);
 		return { config, lastReloadedAt };
 	}
 
 	if (message.type === 'SET_BEHAVIOR') {
-		const { tabId, config } = message;
-		await setBehaviorConfig(tabId, config);
-		await chrome.alarms.clear(behaviorAlarmName(tabId));
-		if (config.enabled) await scheduleNextBehavior(tabId, config);
+		const { urlKey, config } = message;
+		await setBehaviorConfig(urlKey, config);
+		await chrome.alarms.clear(behaviorAlarmName(urlKey));
+		if (config.enabled) await scheduleNextBehavior(urlKey, config);
 		return { ok: true };
 	}
 
 	if (message.type === 'GET_BEHAVIOR') {
-		const config = await getBehaviorConfig(message.tabId);
+		const config = await getBehaviorConfig(message.urlKey);
 		return { config };
 	}
 
@@ -98,47 +107,74 @@ onMessage(async (message) => {
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
 	if (alarm.name.startsWith('autoReload:')) {
-		const tabId = tabIdFromAlarm(alarm.name);
-		const config = await getAutoReloadConfig(tabId);
+		const urlKey = alarm.name.slice('autoReload:'.length);
+		const config = await getAutoReloadConfig(urlKey);
 		if (!config?.enabled) return;
 		try {
-			await reloadAndStamp(tabId, resolveBypassCache(config));
+			const tabIds = await tabsForUrlKey(urlKey);
+			for (const tabId of tabIds) {
+				try {
+					await reloadAndStamp(urlKey, tabId, resolveBypassCache(config));
+				} catch {
+					// Tab closed mid-cycle; keep driving remaining tabs.
+				}
+			}
 		} catch {
-			await clearAutoReloadConfig(tabId);
+			await clearAutoReloadConfig(urlKey);
 			return;
 		}
-		await scheduleNext(tabId, config);
+		await scheduleNext(urlKey, config);
 		return;
 	}
 
 	if (alarm.name.startsWith('behavior:')) {
-		const tabId = tabIdFromBehaviorAlarm(alarm.name);
-		const config = await getBehaviorConfig(tabId);
+		const urlKey = alarm.name.slice('behavior:'.length);
+		const config = await getBehaviorConfig(urlKey);
 		if (!config?.enabled) return;
 
 		const actions = enabledActions(config);
 		if (actions.length === 0) {
-			await scheduleNextBehavior(tabId, config);
+			await scheduleNextBehavior(urlKey, config);
 			return;
 		}
 
 		try {
-			await sendTabMessage(tabId, { type: 'RUN_BEHAVIOR_ACTION', actions });
-		} catch {
-			const tabStillExists = await chrome.tabs
-				.get(tabId)
-				.then(() => true)
-				.catch(() => false);
-			if (!tabStillExists) {
-				await clearBehaviorConfig(tabId);
-				return;
+			const tabIds = await tabsForUrlKey(urlKey);
+			for (const tabId of tabIds) {
+				try {
+					await sendTabMessage(tabId, {
+						type: 'RUN_BEHAVIOR_ACTION',
+						actions,
+						clickSelectors: config.clickSelectors ?? [],
+					});
+				} catch {
+					// Tab mid-reload or content script not ready; skip this tick.
+				}
 			}
+		} catch {
+			await clearBehaviorConfig(urlKey);
+			return;
 		}
-		await scheduleNextBehavior(tabId, config);
+		await scheduleNextBehavior(urlKey, config);
 	}
 });
 
-async function getActiveTabId(): Promise<number | undefined> {
-	const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-	return tab?.id;
+// INFO: One-time cleanup of legacy tabId-keyed entries (`autoReload:<n>`,
+// `lastReloadedAt:<n>`, `behavior:<n>`). URL keys always contain `://`, so a
+// bare integer suffix identifies stale rows. Runs once per service-worker
+// start; cheap no-op after the first run.
+chrome.runtime.onStartup.addListener(() => {
+	void purgeLegacyTabKeys();
+});
+void purgeLegacyTabKeys();
+
+async function purgeLegacyTabKeys(): Promise<void> {
+	const all = await chrome.storage.local.get(null);
+	const legacyKeys = Object.keys(all).filter((key) => {
+		const separator = key.indexOf(':');
+		if (separator === -1) return false;
+		const suffix = key.slice(separator + 1);
+		return /^\d+$/.test(suffix);
+	});
+	if (legacyKeys.length > 0) await chrome.storage.local.remove(legacyKeys);
 }
