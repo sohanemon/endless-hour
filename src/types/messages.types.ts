@@ -16,15 +16,28 @@ export interface BehaviorConfig {
 	clickSelectors: string[];
 }
 
-// INFO: Viewport-space target for trusted CDP input. `kind: 'scroll'` means
-// "wheel at this point by deltaY"; otherwise the point is a click/hover spot.
-export interface BehaviorTarget {
+// INFO: Viewport-space targets for trusted CDP input, discriminated by `kind`
+// so each variant carries exactly the fields its execution needs (a scroll
+// must have deltaY; click/hover must not).
+interface BehaviorPoint {
 	x: number;
 	y: number;
-	kind: 'scroll' | 'hover' | 'click';
-	deltaY?: number;
 }
 
+export interface ScrollTarget extends BehaviorPoint {
+	kind: 'scroll';
+	deltaY: number;
+}
+
+export interface HoverTarget extends BehaviorPoint {
+	kind: 'hover';
+}
+
+export interface ClickTarget extends BehaviorPoint {
+	kind: 'click';
+}
+
+export type BehaviorTarget = ScrollTarget | HoverTarget | ClickTarget;
 export type BehaviorAction = BehaviorTarget['kind'];
 
 export interface MessageMap {
@@ -45,7 +58,7 @@ export interface MessageMap {
 	GET_BEHAVIOR: { type: 'GET_BEHAVIOR'; urlKey: string };
 	BEHAVIOR_TARGET: {
 		type: 'BEHAVIOR_TARGET';
-		actions: Array<'scroll' | 'hover' | 'click'>;
+		actions: BehaviorAction[];
 		clickSelectors: string[];
 	};
 }

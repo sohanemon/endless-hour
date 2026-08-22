@@ -141,50 +141,55 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 	}
 
 	if (alarm.name.startsWith('behavior:')) {
-		const urlKey = alarm.name.slice('behavior:'.length);
-		const config = await getBehaviorConfig(urlKey);
-		if (!config?.enabled) return;
-
-		const actions = enabledActions(config);
-		if (actions.length === 0) {
-			await scheduleNextBehavior(urlKey, config);
-			return;
-		}
-
-		try {
-			const tabIds = await tabsForUrlKey(urlKey);
-			for (const tabId of tabIds) {
-				try {
-					// INFO: Content script resolves WHAT to interact with (safe
-					// element, viewport coordinates); the background then executes
-					// trusted input via chrome.debugger.
-					const response = await sendTabMessage<'BEHAVIOR_TARGET'>(tabId, {
-						type: 'BEHAVIOR_TARGET',
-						actions,
-						clickSelectors: config.clickSelectors ?? [],
-					});
-					const target = response?.target;
-					if (!response?.ok || !target) continue;
-
-					if (target.kind === 'scroll') {
-						await performScroll(tabId, target, target.deltaY ?? 300);
-					} else if (target.kind === 'click') {
-						await performClick(tabId, target);
-					} else {
-						await performHover(tabId, target);
-					}
-				} catch {
-					// Tab mid-reload, content script not ready, or debugger attach
-					// failed (DevTools open); skip this tab this tick.
-				}
-			}
-		} catch {
-			await clearBehaviorConfig(urlKey);
-			return;
-		}
-		await scheduleNextBehavior(urlKey, config);
+		await runBehaviorTick(alarm.name.slice('behavior:'.length));
 	}
 });
+
+// INFO: One behavior tick for a URL key: ask each matching tab's content
+// script to resolve WHAT to interact with (safe element, viewport coords),
+// then execute trusted input on it via chrome.debugger (CDP).
+async function runBehaviorTick(urlKey: string): Promise<void> {
+	const config = await getBehaviorConfig(urlKey);
+	if (!config?.enabled) return;
+
+	const actions = enabledActions(config);
+	if (actions.length === 0) {
+		await scheduleNextBehavior(urlKey, config);
+		return;
+	}
+
+	try {
+		const tabIds = await tabsForUrlKey(urlKey);
+		for (const tabId of tabIds) {
+			try {
+				// INFO: Content script resolves WHAT to interact with (safe
+				// element, viewport coordinates); the background then executes
+				// trusted input via chrome.debugger.
+				const response = await sendTabMessage<'BEHAVIOR_TARGET'>(tabId, {
+					type: 'BEHAVIOR_TARGET',
+					actions,
+					clickSelectors: config.clickSelectors ?? [],
+				});
+				const target = response?.target;
+				if (!response?.ok || !target) continue;
+
+				if (target.kind === 'scroll') {
+					await performScroll(tabId, target, target.deltaY);
+				} else if (target.kind === 'click') {
+					await performClick(tabId, target);
+				} else {
+					await performHover(tabId, target);
+				}
+			} catch {
+				// Tab mid-reload, content script not ready, or debugger attach
+				// failed (DevTools open); skip this tab this tick.
+			}
+		}
+	} catch {
+		// Storage unavailable: config is gone; stop driving this URL key.
+		await clearBehaviorConfig(urlKey);
+	}
+}
 
 // INFO: One-time cleanup of legacy tabId-keyed storage entries.
 // INFO: On SW start, detach any debugger sessions orphaned by the previous
