@@ -19,7 +19,7 @@ export default defineManifest({
 	content_scripts: [
 		{
 			matches: ['<all_urls>'],
-			js: ['src/entries/content/index.ts'],
+			js: ['src/entries/content/picker.ts'],
 			run_at: 'document_idle',
 		},
 	],

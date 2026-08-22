@@ -110,6 +110,15 @@ onMessage(async (message) => {
 		return { ok: true };
 	}
 
+	if (message.type === 'CLEAR_ALL_STORAGE') {
+		// INFO: Nuke every feature config, alarm, and debugger session. URL list
+		// survives so the popup still shows the operator's saved targets.
+		detachAllBehaviors();
+		await chrome.alarms.clearAll();
+		await chrome.storage.local.clear();
+		return { ok: true };
+	}
+
 	if (message.type === 'GET_BEHAVIOR') {
 		const config = await getBehaviorConfig(message.urlKey);
 		return { config };

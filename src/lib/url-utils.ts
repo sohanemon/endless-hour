@@ -1,6 +1,7 @@
 // INFO: URL normalization + matching for URL-keyed config persistence.
-// Configs are stored under a normalized origin+path key so the same page
-// matches across sessions, ports, and query strings.
+// Configs are stored under a normalized origin+path key. A stored key matches
+// any tab whose normalized URL STARTS WITH it, so `https://x.com/app` covers
+// every deeper route (`/app/settings`, `/app/123`) plus query strings.
 
 export function normalizeUrlKey(rawUrl: string): string {
 	try {
@@ -22,7 +23,7 @@ export function currentTabUrl(): Promise<string | undefined> {
 export async function tabsForUrlKey(urlKey: string): Promise<number[]> {
 	const tabs = await chrome.tabs.query({});
 	return tabs
-		.filter((t) => t.url && normalizeUrlKey(t.url) === urlKey)
+		.filter((t) => t.url && normalizeUrlKey(t.url).startsWith(urlKey))
 		.map((t) => t.id)
 		.filter((id): id is number => id != null);
 }

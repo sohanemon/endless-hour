@@ -17,7 +17,7 @@ async function saveUrlList(keys: string[]): Promise<void> {
 	await chrome.storage.local.set({ [URL_LIST_KEY]: keys });
 }
 
-export function useUrlSelection(): {
+export function useUrlSelection(currentDomain?: string): {
 	urlKeys: string[];
 	selected: string | undefined;
 	select: (key: string) => void;
@@ -28,38 +28,47 @@ export function useUrlSelection(): {
 	const [urlKeys, setUrlKeys] = useState<string[]>([]);
 	const [selected, setSelected] = useState<string>();
 
+	// INFO: Load the full list, then show only keys under the current tab's
+	// domain. Storage keeps every key so other domains stay configured.
 	useEffect(() => {
 		void (async () => {
-			const keys = await loadUrlList();
+			const [keys, active] = await Promise.all([
+				loadUrlList(),
+				currentTabUrl(),
+			]);
 			setUrlKeys(keys);
-			if (keys.length > 0) {
-				setSelected((prev) => prev ?? keys[0]);
-			}
-		})();
-	}, []);
 
-	// INFO: Preselects the active tab's URL when it is already in the list, so
-	// the popup opens pointed at the page the user is on. Runs once after the
-	// initial list load (guarded by selected being unset).
-	const loaded = urlKeys.length > 0;
-	useEffect(() => {
-		if (!loaded) return;
-		void (async () => {
-			const url = await currentTabUrl();
-			if (!url) return;
-			const key = normalizeUrlKey(url);
-			setSelected((prev) => (urlKeys.includes(key) ? (prev ?? key) : prev));
+			let domain = currentDomain;
+			if (!domain && active) {
+				try {
+					domain = new URL(active).hostname.replace(/^www\./, '');
+				} catch {
+					domain = undefined;
+				}
+			}
+
+			const visible =
+				domain === undefined
+					? keys
+					: keys.filter((key) => {
+							try {
+								return new URL(key).hostname.replace(/^www\./, '') === domain;
+							} catch {
+								return true;
+							}
+						});
+
+			if (visible.length > 0) setSelected((prev) => prev ?? visible[0]);
 		})();
-	}, [loaded, urlKeys]);
+	}, [currentDomain]);
 
 	const select = useCallback((key: string) => setSelected(key), []);
 
 	const addUrl = useCallback(async (key: string) => {
 		setUrlKeys((prev) => {
 			if (prev.includes(key)) return prev;
-			const next = [...prev, key].sort();
-			void saveUrlList(next);
-			return next;
+			void saveUrlList([...prev, key].sort());
+			return [...prev, key];
 		});
 		setSelected(key);
 	}, []);
@@ -92,6 +101,7 @@ interface UrlBarProps {
 	onAdd: (key: string) => void;
 	onAddCurrent: () => void;
 	onRemove: (key: string) => void;
+	onClearAll: () => void;
 }
 
 export function UrlBar({
@@ -101,6 +111,7 @@ export function UrlBar({
 	onAdd,
 	onAddCurrent,
 	onRemove,
+	onClearAll,
 }: UrlBarProps) {
 	const [newUrl, setNewUrl] = useState('');
 
@@ -119,6 +130,7 @@ export function UrlBar({
 						<div key={key} className="flex items-center gap-1">
 							<button
 								type="button"
+								title={key}
 								onClick={() => onSelect(key)}
 								className={cn(
 									'min-w-0 flex-1 truncate rounded-md px-2 py-1 text-left text-xs font-mono transition-colors',
@@ -162,6 +174,14 @@ export function UrlBar({
 				onClick={onAddCurrent}
 			>
 				Use current tab URL
+			</Button>
+			<Button
+				variant="destructive"
+				size="sm"
+				className="h-8"
+				onClick={onClearAll}
+			>
+				Clear all storage
 			</Button>
 		</div>
 	);

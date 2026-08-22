@@ -1,10 +1,16 @@
+import { useCallback } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Reloader from '@/entries/popup/_components/reloader';
+import { sendMessage } from '@/lib/messaging';
 import Behavior from './_components/behavior';
 import { UrlBar, useUrlSelection } from './_components/url-bar';
 
 export default function App() {
 	const url = useUrlSelection();
+	const clearAll = useCallback(() => {
+		void sendMessage<'CLEAR_ALL_STORAGE'>({ type: 'CLEAR_ALL_STORAGE' });
+		window.close();
+	}, []);
 
 	return (
 		<main className="flex dark w-96 flex-col bg-background text-foreground gap-6 p-5">
@@ -16,6 +22,7 @@ export default function App() {
 				onAdd={(key) => void url.addUrl(key)}
 				onAddCurrent={() => void url.addCurrentTab()}
 				onRemove={(key) => void url.removeUrl(key)}
+				onClearAll={clearAll}
 			/>
 			{/* INFO: Additional feature tabs (e.g. screenshot, css-injector) slot in here. */}
 			<Tabs defaultValue="reloader" className="w-full">

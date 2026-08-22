@@ -56,6 +56,7 @@ export interface MessageMap {
 		config: BehaviorConfig;
 	};
 	GET_BEHAVIOR: { type: 'GET_BEHAVIOR'; urlKey: string };
+	CLEAR_ALL_STORAGE: { type: 'CLEAR_ALL_STORAGE' };
 	BEHAVIOR_TARGET: {
 		type: 'BEHAVIOR_TARGET';
 		actions: BehaviorAction[];
@@ -79,4 +80,5 @@ export interface ResponseMap {
 	SET_BEHAVIOR: { ok: boolean };
 	GET_BEHAVIOR: { config: BehaviorConfig | undefined };
 	BEHAVIOR_TARGET: { ok: boolean; target?: BehaviorTarget };
+	CLEAR_ALL_STORAGE: { ok: boolean };
 }
