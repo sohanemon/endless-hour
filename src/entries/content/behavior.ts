@@ -104,7 +104,12 @@ export function humanHover(element: Element, onDone?: () => void): void {
 	});
 }
 
+// FIX: Browsers only apply native click activation (caret placement, focus)
+// to trusted events. A synthetic mousedown/mouseup/click alone is a no-op for
+// form fields, so focusable targets are explicitly focused after the press.
 export function humanClick(element: Element): void {
+	element.scrollIntoView({ block: 'center' });
+
 	const rect = element.getBoundingClientRect();
 	const targetX = rect.left + rect.width / 2 + randomBetween(-5, 5);
 	const targetY = rect.top + rect.height / 2 + randomBetween(-5, 5);
@@ -118,6 +123,15 @@ export function humanClick(element: Element): void {
 				element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
 				element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
 				element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+				if (
+					element instanceof HTMLElement &&
+					element.matches(
+						'input:not([type="hidden"]), textarea, select, a[href], button, summary, [contenteditable="true"], [contenteditable=""], [tabindex]',
+					)
+				) {
+					element.focus({ preventScroll: true });
+				}
 			},
 			randomBetween(50, 150),
 		);
@@ -178,17 +192,14 @@ export function runBehaviorAction(
 			break;
 		}
 		case 'click': {
-			const customEls = clickSelectors.flatMap((sel) => {
+			const pool = clickSelectors.flatMap((sel) => {
 				try {
 					return safeInteractiveElements(sel);
 				} catch {
+					// Invalid user selector: skip it, keep the rest.
 					return [];
 				}
 			});
-			const defaultEls = safeInteractiveElements(
-				'button, a[href], [role="button"]',
-			);
-			const pool = customEls.length > 0 ? customEls : defaultEls;
 			if (pool.length)
 				humanClick(pool[Math.floor(Math.random() * pool.length)]);
 			break;

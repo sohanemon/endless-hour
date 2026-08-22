@@ -16,8 +16,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		message.type === 'RUN_BEHAVIOR_ACTION'
 	) {
 		try {
-			const { actions } = message as MessageMap['RUN_BEHAVIOR_ACTION'];
-			runBehaviorAction(actions);
+			const { actions, clickSelectors } =
+				message as MessageMap['RUN_BEHAVIOR_ACTION'];
+			runBehaviorAction(actions, clickSelectors);
 			sendResponse({ ok: true });
 		} catch {
 			sendResponse({ ok: false });
