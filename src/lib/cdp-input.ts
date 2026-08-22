@@ -11,6 +11,11 @@ interface Point {
 	y: number;
 }
 
+interface Viewport {
+	width: number;
+	height: number;
+}
+
 type DebuggerTarget = { tabId: number };
 
 function sendCommand<T = object>(
@@ -58,21 +63,54 @@ function jitter(range: number): number {
 	return (Math.random() - 0.5) * range;
 }
 
-// INFO: Human-ish pointer glide: eased interpolation with per-step timing and
-// positional jitter. CDP synthesizes pointer events from mouse commands.
-function moveSteps(from: Point, to: Point): Array<Point & { dt: number }> {
-	const steps = 8 + Math.floor(Math.random() * 5);
-	const points: Array<Point & { dt: number }> = [];
+// INFO: Standard-normal sample via Box-Muller. Aim scatter and seeded origins
+// use it so offsets cluster near center with a realistic tail instead of a
+// flat uniform band.
+function gauss(): number {
+	let u = 0;
+	let v = 0;
+	while (u === 0) u = Math.random();
+	while (v === 0) v = Math.random();
+	return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+interface GlideStep extends Point {
+	dt: number;
+}
+
+// INFO: Multi-segment curved glide. A single eased line is trivially
+// classified: humans move in arcs that overshoot slightly and correct, scale
+// step count and timing with distance, and wobble perpendicular to the path.
+// The perpendicular sine hump is the arc; the terminal overshoot is the
+// correction a real hand makes past the target.
+function moveSteps(from: Point, to: Point): GlideStep[] {
+	const dx = to.x - from.x;
+	const dy = to.y - from.y;
+	const distance = Math.hypot(dx, dy);
+	const steps = Math.max(
+		4,
+		Math.round(distance / (12 + Math.random() * 10)) + 3,
+	);
+	// INFO: Arc bulge grows sublinearly with distance, random side per stroke.
+	const bulge =
+		distance * (0.04 + Math.random() * 0.1) * (Math.random() < 0.5 ? -1 : 1) +
+		gauss() * 2;
+	const overshoot = distance > 60 ? gauss() * 4 : 0;
+	const points: GlideStep[] = [];
 	for (let i = 1; i <= steps; i++) {
 		const progress = i / steps;
 		const ease =
 			progress < 0.5
 				? 2 * progress * progress
 				: -1 + (4 - 2 * progress) * progress;
+		const arcOffset =
+			bulge * Math.sin(Math.PI * progress) +
+			jitter(1.6) +
+			(i === steps ? overshoot : 0);
 		points.push({
-			x: Math.round(from.x + (to.x - from.x) * ease + jitter(2)),
-			y: Math.round(from.y + (to.y - from.y) * ease + jitter(2)),
-			dt: Math.round(8 + Math.random() * 24),
+			x: Math.round(from.x + dx * ease - (dy / (distance || 1)) * arcOffset),
+			y: Math.round(from.y + dy * ease + (dx / (distance || 1)) * arcOffset),
+			dt: Math.round(9 + Math.random() * 22 + (distance / steps) * 0.35),
 		});
 	}
 	return points;
@@ -100,12 +138,33 @@ export function detachAllBehaviors(): void {
 // stale across runs, so each run re-attaches fresh ("already attached" tolerated).
 attachedTabs.clear();
 
+async function viewportOf(target: DebuggerTarget): Promise<Viewport> {
+	try {
+		const metrics = await sendCommand<{
+			cssVisualViewport?: { clientWidth?: number; clientHeight?: number };
+		}>(target, 'Page.getLayoutMetrics');
+		const width = metrics.cssVisualViewport?.clientWidth;
+		const height = metrics.cssVisualViewport?.clientHeight;
+		if (width && height) return { width, height };
+	} catch {
+		// Layout metrics unavailable (rare); fall through to the default.
+	}
+	return { width: 1280, height: 800 };
+}
+
 async function glideTo(
 	target: DebuggerTarget,
 	tabId: number,
 	point: Point,
+	viewport: Viewport,
 ): Promise<void> {
-	const from = cursorPositions.get(tabId) ?? { x: point.x, y: point.y };
+	// INFO: First action after a service-worker restart has no cursor memory.
+	// Teleporting (press with zero preceding mouseMoved) is a known bot tell,
+	// so seed a Gaussian origin near the viewport center and glide in.
+	const from = cursorPositions.get(tabId) ?? {
+		x: Math.round(viewport.width / 2 + gauss() * viewport.width * 0.15),
+		y: Math.round(viewport.height / 2 + gauss() * viewport.height * 0.15),
+	};
 	for (const step of moveSteps(from, point)) {
 		await sendCommand(target, 'Input.dispatchMouseEvent', {
 			type: 'mouseMoved',
@@ -123,7 +182,7 @@ export async function performClick(tabId: number, point: Point): Promise<void> {
 	const target: DebuggerTarget = { tabId };
 	await attach(target);
 	try {
-		await glideTo(target, tabId, point);
+		await glideTo(target, tabId, point, await viewportOf(target));
 		await sendCommand(target, 'Input.dispatchMouseEvent', {
 			type: 'mousePressed',
 			x: point.x,
@@ -155,7 +214,7 @@ export async function performHover(tabId: number, point: Point): Promise<void> {
 	const target: DebuggerTarget = { tabId };
 	await attach(target);
 	try {
-		await glideTo(target, tabId, point);
+		await glideTo(target, tabId, point, await viewportOf(target));
 		// INFO: Dwell so hover-intent UIs register the visit.
 		await sleep(400 + Math.random() * 800);
 	} catch (error) {
