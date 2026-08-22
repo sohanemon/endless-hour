@@ -10,6 +10,52 @@ export function randomBetween(min: number, max: number): number {
 	return Math.random() * (max - min) + min;
 }
 
+// INFO: Trusted input emits a pointer event before every mouse event, and many
+// frameworks (React, Turbo) bind pointer-only handlers. These factories mirror
+// that pairing, including the `buttons` bitmask and pointer identity.
+interface InputPoint {
+	clientX: number;
+	clientY: number;
+	buttons?: number;
+}
+
+function mouseEvent(type: string, point: InputPoint): MouseEvent {
+	return new MouseEvent(type, {
+		bubbles: type !== 'mouseenter' && type !== 'mouseleave',
+		cancelable: true,
+		view: window,
+		clientX: point.clientX,
+		clientY: point.clientY,
+		buttons: point.buttons ?? 0,
+	});
+}
+
+function pointerEvent(type: string, point: InputPoint): PointerEvent {
+	return new PointerEvent(type, {
+		bubbles: type !== 'pointerenter' && type !== 'pointerleave',
+		cancelable: true,
+		view: window,
+		clientX: point.clientX,
+		clientY: point.clientY,
+		buttons: point.buttons ?? 0,
+		pointerId: 1,
+		pointerType: 'mouse',
+		isPrimary: true,
+	});
+}
+
+// INFO: Dispatches `pointer<type>` then `<type>`. A prevented pointer event
+// suppresses the compatibility mouse event, matching native semantics.
+function dispatchPointerPair(
+	target: EventTarget,
+	type: 'move' | 'down' | 'up' | 'over' | 'out' | 'enter' | 'leave',
+	point: InputPoint,
+): void {
+	const pointer = pointerEvent(`pointer${type}`, point);
+	target.dispatchEvent(pointer);
+	if (!pointer.defaultPrevented) target.dispatchEvent(mouseEvent(type, point));
+}
+
 export function humanScroll(targetY: number): void {
 	const startY = window.scrollY;
 	const maxY = document.documentElement.scrollHeight - window.innerHeight;
@@ -28,8 +74,26 @@ export function humanScroll(targetY: number): void {
 			progress < 0.5
 				? 2 * progress * progress
 				: -1 + (4 - 2 * progress) * progress;
+		const y = startY + distance * easeProgress;
+		const deltaY = y - window.scrollY;
 
-		window.scrollTo(0, startY + distance * easeProgress);
+		if (Math.abs(deltaY) >= 1) {
+			// INFO: Untrusted wheel events do not scroll natively. Emit the wheel
+			// signal for listeners, then apply the delta manually unless canceled.
+			const wheel = new WheelEvent('wheel', {
+				bubbles: true,
+				cancelable: true,
+				view: window,
+				deltaY,
+				deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+				clientX: lastMouseX,
+				clientY: lastMouseY,
+			});
+			const target: Element | Document =
+				document.elementFromPoint(lastMouseX, lastMouseY) ?? document;
+			target.dispatchEvent(wheel);
+			if (!wheel.defaultPrevented) window.scrollBy(0, deltaY);
+		}
 
 		if (currentStep >= steps) clearInterval(interval);
 	}, duration / steps);
@@ -47,18 +111,20 @@ export function moveMouseTo(
 	for (let i = 0; i <= steps; i++) {
 		setTimeout(() => {
 			const progress = i / steps;
-			const currentX = startX + (targetX - startX) * progress;
-			const currentY = startY + (targetY - startY) * progress;
+			// Same ease-in-out curve as humanScroll; linear motion reads robotic.
+			const easeProgress =
+				progress < 0.5
+					? 2 * progress * progress
+					: -1 + (4 - 2 * progress) * progress;
+			const currentX = startX + (targetX - startX) * easeProgress;
+			const currentY = startY + (targetY - startY) * easeProgress;
 			const target: Element | Document =
 				document.elementFromPoint(currentX, currentY) ?? document;
 
-			target.dispatchEvent(
-				new MouseEvent('mousemove', {
-					bubbles: true,
-					clientX: currentX,
-					clientY: currentY,
-				}),
-			);
+			dispatchPointerPair(target, 'move', {
+				clientX: currentX,
+				clientY: currentY,
+			});
 			lastMouseX = currentX;
 			lastMouseY = currentY;
 
@@ -75,12 +141,14 @@ export function humanHover(element: Element, onDone?: () => void): void {
 	// If a hover is already in progress, end it immediately before starting the new one.
 	if (activeHover) {
 		clearTimeout(activeHover.timeoutId);
-		activeHover.element.dispatchEvent(
-			new MouseEvent('mouseout', { bubbles: true }),
-		);
-		activeHover.element.dispatchEvent(
-			new MouseEvent('mouseleave', { bubbles: true }),
-		);
+		dispatchPointerPair(activeHover.element, 'out', {
+			clientX: lastMouseX,
+			clientY: lastMouseY,
+		});
+		dispatchPointerPair(activeHover.element, 'leave', {
+			clientX: lastMouseX,
+			clientY: lastMouseY,
+		});
 		activeHover = undefined;
 	}
 
@@ -89,13 +157,25 @@ export function humanHover(element: Element, onDone?: () => void): void {
 	const targetY = rect.top + rect.height / 2 + randomBetween(-5, 5);
 
 	moveMouseTo(targetX, targetY, () => {
-		element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-		element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+		dispatchPointerPair(element, 'over', {
+			clientX: targetX,
+			clientY: targetY,
+		});
+		dispatchPointerPair(element, 'enter', {
+			clientX: targetX,
+			clientY: targetY,
+		});
 
 		const dwellMs = randomBetween(400, 1200);
 		const timeoutId = setTimeout(() => {
-			element.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
-			element.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+			dispatchPointerPair(element, 'out', {
+				clientX: targetX,
+				clientY: targetY,
+			});
+			dispatchPointerPair(element, 'leave', {
+				clientX: targetX,
+				clientY: targetY,
+			});
 			if (activeHover?.element === element) activeHover = undefined;
 			onDone?.();
 		}, dwellMs);
@@ -120,9 +200,18 @@ export function humanClick(element: Element): void {
 
 		setTimeout(
 			() => {
-				element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-				element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-				element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+				dispatchPointerPair(element, 'down', {
+					clientX: targetX,
+					clientY: targetY,
+					buttons: 1,
+				});
+				dispatchPointerPair(element, 'up', {
+					clientX: targetX,
+					clientY: targetY,
+				});
+				element.dispatchEvent(
+					mouseEvent('click', { clientX: targetX, clientY: targetY }),
+				);
 
 				if (
 					element instanceof HTMLElement &&
