@@ -154,10 +154,10 @@ async function viewportOf(target: DebuggerTarget): Promise<Viewport> {
 
 async function glideTo(
 	target: DebuggerTarget,
-	tabId: number,
 	point: Point,
 	viewport: Viewport,
 ): Promise<void> {
+	const tabId = target.tabId;
 	// INFO: First action after a service-worker restart has no cursor memory.
 	// Teleporting (press with zero preceding mouseMoved) is a known bot tell,
 	// so seed a Gaussian origin near the viewport center and glide in.
@@ -178,11 +178,13 @@ async function glideTo(
 	cursorPositions.set(tabId, { x: point.x, y: point.y });
 }
 
-export async function performClick(tabId: number, point: Point): Promise<void> {
-	const target: DebuggerTarget = { tabId };
+export async function performClick(
+	target: DebuggerTarget,
+	point: Point,
+): Promise<void> {
 	await attach(target);
 	try {
-		await glideTo(target, tabId, point, await viewportOf(target));
+		await glideTo(target, point, await viewportOf(target));
 		await sendCommand(target, 'Input.dispatchMouseEvent', {
 			type: 'mousePressed',
 			x: point.x,
@@ -210,11 +212,13 @@ export async function performClick(tabId: number, point: Point): Promise<void> {
 	}
 }
 
-export async function performHover(tabId: number, point: Point): Promise<void> {
-	const target: DebuggerTarget = { tabId };
+export async function performHover(
+	target: DebuggerTarget,
+	point: Point,
+): Promise<void> {
 	await attach(target);
 	try {
-		await glideTo(target, tabId, point, await viewportOf(target));
+		await glideTo(target, point, await viewportOf(target));
 		// INFO: Dwell so hover-intent UIs register the visit.
 		await sleep(400 + Math.random() * 800);
 	} catch (error) {
@@ -225,11 +229,10 @@ export async function performHover(tabId: number, point: Point): Promise<void> {
 }
 
 export async function performScroll(
-	tabId: number,
+	target: DebuggerTarget,
 	point: Point,
 	deltaY: number,
 ): Promise<void> {
-	const target: DebuggerTarget = { tabId };
 	await attach(target);
 	try {
 		// INFO: Wheel over the given viewport point; Chrome scrolls the scrollable

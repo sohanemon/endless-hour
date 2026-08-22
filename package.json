@@ -20,6 +20,8 @@
 		"extract:icons": "bun scripts/extract-icons.ts",
 		"sync": "bun run generate:colors && bun run generate:icons && bun run extract:icons",
 		"preview": "vite preview",
+		"test": "vitest run",
+		"test:watch": "vitest",
 		"prebuild": "bun run sync"
 	},
 	"dependencies": {

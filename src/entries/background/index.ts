@@ -17,6 +17,7 @@ import {
 } from '../../lib/cdp-input.ts';
 import { onMessage, sendTabMessage } from '../../lib/messaging';
 import { resolveBypassCache } from '../../lib/reload-utils.ts';
+import { URL_LIST_KEY } from '../../lib/storage-keys.ts';
 import { tabsForUrlKey } from '../../lib/url-utils';
 import type { BehaviorConfig } from '../../types/messages.types';
 
@@ -116,7 +117,7 @@ onMessage(async (message) => {
 		await chrome.alarms.clearAll();
 		const all = await chrome.storage.local.get(null);
 		await chrome.storage.local.remove(
-			Object.keys(all).filter((key) => key !== 'urlList'),
+			Object.keys(all).filter((key) => key !== URL_LIST_KEY),
 		);
 		return { ok: true };
 	}
@@ -184,12 +185,13 @@ async function runBehaviorTick(urlKey: string): Promise<void> {
 				const target = response?.target;
 				if (!response?.ok || !target) continue;
 
+				const cdpTarget = { tabId };
 				if (target.kind === 'scroll') {
-					await performScroll(tabId, target, target.deltaY);
+					await performScroll(cdpTarget, target, target.deltaY);
 				} else if (target.kind === 'click') {
-					await performClick(tabId, target);
+					await performClick(cdpTarget, target);
 				} else {
-					await performHover(tabId, target);
+					await performHover(cdpTarget, target);
 				}
 			} catch {
 				// Tab mid-reload, content script not ready, or debugger attach

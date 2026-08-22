@@ -16,10 +16,6 @@ export async function setBehaviorConfig(
 	await chrome.storage.local.set({ [keyFor(urlKey)]: config });
 }
 
-export async function clearBehaviorConfig(urlKey: string): Promise<void> {
-	await chrome.storage.local.remove(keyFor(urlKey));
-}
-
 // INFO: Returns every stored behavior config, keyed by urlKey. Used by the
 // background alarm tick to drive all matching tabs for all enabled URLs.
 export async function getAllBehaviorConfigs(): Promise<

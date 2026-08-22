@@ -1,5 +1,22 @@
-import { describe, expect, it } from 'vitest';
-import { domainOf, hostMatchesDomain, normalizeUrlKey } from './url-utils';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+	domainOf,
+	hostMatchesDomain,
+	normalizeUrlKey,
+	tabsForUrlKey,
+} from './url-utils';
+
+// INFO: Minimal chrome.tabs stub; url-utils touches only `query`.
+const queryMock = vi.fn();
+vi.stubGlobal('chrome', { tabs: { query: queryMock } });
+
+afterEach(() => {
+	queryMock.mockReset();
+});
+
+function tab(id: number, url: string | undefined) {
+	return { id, url };
+}
 
 describe('normalizeUrlKey', () => {
 	it('strips www, query, hash, and trailing slash', () => {
@@ -46,6 +63,48 @@ describe('hostMatchesDomain', () => {
 
 	it('rejects suffix lookalikes without dot boundary', () => {
 		expect(hostMatchesDomain('badgithub.com', 'github.com')).toBe(false);
+	});
+});
+
+describe('tabsForUrlKey', () => {
+	it('matches tabs whose normalized URL starts with the key', async () => {
+		queryMock.mockResolvedValue([
+			tab(1, 'https://github.com/orgs/github/repositories'),
+			tab(2, 'https://github.com/orgs'),
+			tab(3, 'https://gitlab.com/orgs'),
+			tab(4, undefined),
+		]);
+		await expect(tabsForUrlKey('https://github.com/orgs')).resolves.toEqual([
+			1, 2,
+		]);
+	});
+
+	it('normalizes tab URLs before matching (www, query, hash)', async () => {
+		queryMock.mockResolvedValue([
+			tab(1, 'https://www.github.com/orgs?q=1#feed'),
+		]);
+		await expect(tabsForUrlKey('https://github.com/orgs')).resolves.toEqual([
+			1,
+		]);
+	});
+
+	it('does not match a different path sharing the prefix text', async () => {
+		queryMock.mockResolvedValue([tab(1, 'https://github.com/orgs2')]);
+		// INFO: Literal string prefix: `/orgs` matches `/orgs2`. Documented
+		// behavior — segment-boundary matching would be a product change.
+		await expect(tabsForUrlKey('https://github.com/orgs')).resolves.toEqual([
+			1,
+		]);
+	});
+
+	it('returns only numeric tab ids, skipping null ids', async () => {
+		queryMock.mockResolvedValue([
+			tab(7, 'https://github.com/orgs'),
+			{ id: undefined, url: 'https://github.com/orgs/x' },
+		]);
+		await expect(tabsForUrlKey('https://github.com/orgs')).resolves.toEqual([
+			7,
+		]);
 	});
 });
 

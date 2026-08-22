@@ -17,10 +17,6 @@ export async function setAutoReloadConfig(
 	await chrome.storage.local.set({ [configKey(urlKey)]: config });
 }
 
-export async function clearAutoReloadConfig(urlKey: string): Promise<void> {
-	await chrome.storage.local.remove(configKey(urlKey));
-}
-
 export async function getLastReloadedAt(
 	urlKey: string,
 ): Promise<number | undefined> {

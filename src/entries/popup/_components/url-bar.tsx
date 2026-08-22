@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { URL_LIST_KEY } from '@/lib/storage-keys';
 import {
 	currentTabUrl,
 	domainOf,
@@ -10,8 +11,6 @@ import {
 	normalizeUrlKey,
 } from '@/lib/url-utils';
 import { cn } from '@/lib/utils';
-
-const URL_LIST_KEY = 'urlList';
 
 async function loadUrlList(): Promise<string[]> {
 	const result = await chrome.storage.local.get(URL_LIST_KEY);
@@ -71,31 +70,44 @@ export function useUrlSelection(): {
 	const select = useCallback((key: string) => setSelected(key), []);
 
 	const addUrl = useCallback(async (key: string) => {
-		setUrlKeys((prev) => {
-			if (prev.includes(key)) return prev;
-			void saveUrlList([...prev, key].sort());
-			return [...prev, key];
-		});
+		// INFO: urlKeys is the domain-filtered VIEW; storage holds every domain's
+		// keys. Mutations must read-modify-write the FULL list or an add/remove
+		// from one domain's popup would erase every other domain's saved URLs.
+		const full = await loadUrlList();
+		if (!full.includes(key)) {
+			await saveUrlList([...full, key].sort());
+		}
+		setUrlKeys((prev) => (prev.includes(key) ? prev : [...prev, key].sort()));
 		setSelected(key);
 	}, []);
+
+	const removeUrl = useCallback(
+		async (key: string) => {
+			// INFO: Same full-list read-modify-write as addUrl: storage holds every
+			// domain's keys; the view only shows the current domain's.
+			const remaining = (await loadUrlList()).filter((k) => k !== key);
+			await saveUrlList(remaining);
+			setUrlKeys((prev) => prev.filter((k) => k !== key));
+			if (selected === key) {
+				// INFO: Prefer a same-domain sibling as the next selection.
+				const removedDomain = domainOf(key);
+				const visibleNext = remaining.find(
+					(k) =>
+						k !== key &&
+						(removedDomain === undefined ||
+							hostMatchesDomain(new URL(k).hostname, removedDomain ?? '')),
+				);
+				setSelected(visibleNext);
+			}
+		},
+		[selected],
+	);
 
 	const addCurrentTab = useCallback(async () => {
 		const url = await currentTabUrl();
 		if (!url) return;
 		await addUrl(normalizeUrlKey(url));
 	}, [addUrl]);
-
-	const removeUrl = useCallback(
-		async (key: string) => {
-			const next = urlKeys.filter((k) => k !== key);
-			setUrlKeys(next);
-			await saveUrlList(next);
-			if (selected === key) {
-				setSelected(next[0]);
-			}
-		},
-		[urlKeys, selected],
-	);
 
 	return { urlKeys, selected, select, addUrl, addCurrentTab, removeUrl };
 }
