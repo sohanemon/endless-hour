@@ -23,7 +23,7 @@ export default defineManifest({
 			run_at: 'document_idle',
 		},
 	],
-	permissions: ['tabs', 'alarms', 'storage'],
+	permissions: ['tabs', 'alarms', 'storage', 'debugger'],
 	icons: {
 		16: 'generated/icon-16.png',
 		48: 'generated/icon-48.png',

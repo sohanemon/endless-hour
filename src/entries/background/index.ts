@@ -1,4 +1,3 @@
-import { resolveBypassCache } from '../../lib/reload-utils.ts';
 import {
 	clearAutoReloadConfig,
 	getAutoReloadConfig,
@@ -11,7 +10,15 @@ import {
 	getBehaviorConfig,
 	setBehaviorConfig,
 } from '../../lib/behavior.store.ts';
+import {
+	detachAllBehaviors,
+	detachBehavior,
+	performClick,
+	performHover,
+	performScroll,
+} from '../../lib/cdp-input.ts';
 import { onMessage, sendTabMessage } from '../../lib/messaging';
+import { resolveBypassCache } from '../../lib/reload-utils.ts';
 import { tabsForUrlKey } from '../../lib/url-utils';
 import type { BehaviorConfig } from '../../types/messages.types';
 
@@ -93,7 +100,13 @@ onMessage(async (message) => {
 		const { urlKey, config } = message;
 		await setBehaviorConfig(urlKey, config);
 		await chrome.alarms.clear(behaviorAlarmName(urlKey));
-		if (config.enabled) await scheduleNextBehavior(urlKey, config);
+		if (config.enabled) {
+			await scheduleNextBehavior(urlKey, config);
+		} else {
+			// INFO: Feature disabled: drop the debugger banner immediately.
+			const tabIds = await tabsForUrlKey(urlKey);
+			await Promise.all(tabIds.map((id) => detachBehavior(id)));
+		}
 		return { ok: true };
 	}
 
@@ -142,13 +155,27 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 			const tabIds = await tabsForUrlKey(urlKey);
 			for (const tabId of tabIds) {
 				try {
-					await sendTabMessage(tabId, {
-						type: 'RUN_BEHAVIOR_ACTION',
+					// INFO: Content script resolves WHAT to interact with (safe
+					// element, viewport coordinates); the background then executes
+					// trusted input via chrome.debugger.
+					const response = await sendTabMessage<'BEHAVIOR_TARGET'>(tabId, {
+						type: 'BEHAVIOR_TARGET',
 						actions,
 						clickSelectors: config.clickSelectors ?? [],
 					});
+					const target = response?.target;
+					if (!response?.ok || !target) continue;
+
+					if (target.kind === 'scroll') {
+						await performScroll(tabId, target, target.deltaY ?? 300);
+					} else if (target.kind === 'click') {
+						await performClick(tabId, target);
+					} else {
+						await performHover(tabId, target);
+					}
 				} catch {
-					// Tab mid-reload or content script not ready; skip this tick.
+					// Tab mid-reload, content script not ready, or debugger attach
+					// failed (DevTools open); skip this tab this tick.
 				}
 			}
 		} catch {
@@ -159,14 +186,20 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 	}
 });
 
-// INFO: One-time cleanup of legacy tabId-keyed entries (`autoReload:<n>`,
-// `lastReloadedAt:<n>`, `behavior:<n>`). URL keys always contain `://`, so a
-// bare integer suffix identifies stale rows. Runs once per service-worker
-// start; cheap no-op after the first run.
+// INFO: One-time cleanup of legacy tabId-keyed storage entries.
+// INFO: On SW start, detach any debugger sessions orphaned by the previous
+// run (the worker can die mid-tick, leaving the banner up). Also purge legacy
+// tabId-keyed storage entries (`autoReload:<n>`, `lastReloadedAt:<n>`,
+// `behavior:<n>`); URL keys always contain `://`, so a bare integer suffix
+// identifies stale rows.
 chrome.runtime.onStartup.addListener(() => {
+	detachAllBehaviors();
 	void purgeLegacyTabKeys();
 });
-void purgeLegacyTabKeys();
+void (async () => {
+	detachAllBehaviors();
+	await purgeLegacyTabKeys();
+})();
 
 async function purgeLegacyTabKeys(): Promise<void> {
 	const all = await chrome.storage.local.get(null);
