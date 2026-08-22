@@ -3,13 +3,18 @@
 // any tab whose normalized URL STARTS WITH it, so `https://x.com/app` covers
 // every deeper route (`/app/settings`, `/app/123`) plus query strings.
 
+function stripWww(hostname: string): string {
+	return hostname.replace(/^www\./, '');
+}
+
 export function normalizeUrlKey(rawUrl: string): string {
 	try {
 		const url = new URL(rawUrl);
-		const hostname = url.hostname.replace(/^www\./, '');
 		const path = url.pathname.replace(/\/+$/, '') || '/';
-		return `${url.protocol}//${hostname}${path}`;
+		return `${url.protocol}//${stripWww(url.hostname)}${path}`;
 	} catch {
+		// Not parseable as a URL: keep the operator's raw input as the key so
+		// nothing they typed becomes unreachable; matching falls back to it.
 		return rawUrl.trim();
 	}
 }
@@ -17,13 +22,13 @@ export function normalizeUrlKey(rawUrl: string): string {
 // INFO: Registrable-domain-style match without the public-suffix list:
 // `gist.github.com` counts as github.com; `notgithub.com` does not.
 export function hostMatchesDomain(hostname: string, domain: string): boolean {
-	const host = hostname.replace(/^www\./, '');
+	const host = stripWww(hostname);
 	return host === domain || host.endsWith(`.${domain}`);
 }
 
 export function domainOf(rawUrl: string): string | undefined {
 	try {
-		return new URL(rawUrl).hostname.replace(/^www\./, '');
+		return stripWww(new URL(rawUrl).hostname);
 	} catch {
 		return undefined;
 	}

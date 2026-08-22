@@ -22,7 +22,7 @@ async function saveUrlList(keys: string[]): Promise<void> {
 	await chrome.storage.local.set({ [URL_LIST_KEY]: keys });
 }
 
-export function useUrlSelection(currentDomain?: string): {
+export function useUrlSelection(): {
 	urlKeys: string[];
 	selected: string | undefined;
 	select: (key: string) => void;
@@ -33,7 +33,7 @@ export function useUrlSelection(currentDomain?: string): {
 	const [urlKeys, setUrlKeys] = useState<string[]>([]);
 	const [selected, setSelected] = useState<string>();
 
-	// INFO: Load the full list, then show ONLY keys under the current tab's
+	// INFO: Load the full list, then show ONLY keys under the active tab's
 	// registrable domain (gist.github.com counts as github.com). Storage keeps
 	// every key so other domains stay configured; switching tabs re-filters on
 	// next popup open.
@@ -46,7 +46,7 @@ export function useUrlSelection(currentDomain?: string): {
 			]);
 			if (cancelled) return;
 
-			const domain = currentDomain ?? domainOf(active ?? '');
+			const domain = domainOf(active ?? '');
 			const visible =
 				domain === undefined
 					? keys
@@ -59,12 +59,14 @@ export function useUrlSelection(currentDomain?: string): {
 						});
 
 			setUrlKeys(visible);
-			if (visible.length > 0) setSelected((prev) => prev ?? visible[0]);
+			setSelected((prev) =>
+				prev !== undefined && visible.includes(prev) ? prev : visible[0],
+			);
 		})();
 		return () => {
 			cancelled = true;
 		};
-	}, [currentDomain]);
+	}, []);
 
 	const select = useCallback((key: string) => setSelected(key), []);
 

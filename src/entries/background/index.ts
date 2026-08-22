@@ -109,11 +109,15 @@ onMessage(async (message) => {
 	}
 
 	if (message.type === 'CLEAR_ALL_STORAGE') {
-		// INFO: Nuke every feature config, alarm, and debugger session. URL list
-		// survives so the popup still shows the operator's saved targets.
+		// INFO: Wipe every feature config and alarm, drop all debugger sessions.
+		// The saved URL list survives — it's operator curation, not feature
+		// state; re-adding every target after a reset would be pure friction.
 		detachAllBehaviors();
 		await chrome.alarms.clearAll();
-		await chrome.storage.local.clear();
+		const all = await chrome.storage.local.get(null);
+		await chrome.storage.local.remove(
+			Object.keys(all).filter((key) => key !== 'urlList'),
+		);
 		return { ok: true };
 	}
 

@@ -48,7 +48,8 @@
 		"tailwindcss": "^4.3.3",
 		"typescript": "^7.0.2",
 		"vite": "^8.1.5",
-		"vite-plugin-zip-pack": "^1.2.4"
+		"vite-plugin-zip-pack": "^1.2.4",
+		"vitest": "^4.1.11"
 	},
 	"license": "MIT",
 	"keywords": [
