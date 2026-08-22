@@ -1,12 +1,10 @@
 import {
-	clearAutoReloadConfig,
 	getAutoReloadConfig,
 	getLastReloadedAt,
 	setAutoReloadConfig,
 	setLastReloadedAt,
 } from '../../lib/auto-reload.store.ts';
 import {
-	clearBehaviorConfig,
 	getBehaviorConfig,
 	setBehaviorConfig,
 } from '../../lib/behavior.store.ts';
@@ -142,8 +140,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 				}
 			}
 		} catch {
-			await clearAutoReloadConfig(urlKey);
-			return;
+			// Transient failure (SW cold start, storage hiccup): keep the config
+			// and reschedule so the chain self-heals on the next tick.
 		}
 		await scheduleNext(urlKey, config);
 		return;
@@ -195,25 +193,20 @@ async function runBehaviorTick(urlKey: string): Promise<void> {
 			}
 		}
 	} catch {
-		// Storage unavailable: config is gone; stop driving this URL key.
-		await clearBehaviorConfig(urlKey);
+		// Transient failure (SW cold start, storage hiccup): keep the config
+		// so the chain self-heals on the next tick.
 	}
+	await scheduleNextBehavior(urlKey, config);
 }
-
-// INFO: One-time cleanup of legacy tabId-keyed storage entries.
-// INFO: On SW start, detach any debugger sessions orphaned by the previous
-// run (the worker can die mid-tick, leaving the banner up). Also purge legacy
-// tabId-keyed storage entries (`autoReload:<n>`, `lastReloadedAt:<n>`,
-// `behavior:<n>`); URL keys always contain `://`, so a bare integer suffix
-// identifies stale rows.
+// INFO: One-time cleanup of legacy tabId-keyed storage entries
+// (`autoReload:<n>`, `lastReloadedAt:<n>`, `behavior:<n>`). URL keys always
+// contain `://`, so a bare integer suffix identifies stale rows. NOTE: no
+// detachAllBehaviors() here — the worker wakes on every alarm tick and must
+// not tear down live debugger sessions; attach() tolerates re-attach instead.
 chrome.runtime.onStartup.addListener(() => {
-	detachAllBehaviors();
 	void purgeLegacyTabKeys();
 });
-void (async () => {
-	detachAllBehaviors();
-	await purgeLegacyTabKeys();
-})();
+void purgeLegacyTabKeys();
 
 async function purgeLegacyTabKeys(): Promise<void> {
 	const all = await chrome.storage.local.get(null);

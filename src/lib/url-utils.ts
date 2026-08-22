@@ -14,6 +14,21 @@ export function normalizeUrlKey(rawUrl: string): string {
 	}
 }
 
+// INFO: Registrable-domain-style match without the public-suffix list:
+// `gist.github.com` counts as github.com; `notgithub.com` does not.
+export function hostMatchesDomain(hostname: string, domain: string): boolean {
+	const host = hostname.replace(/^www\./, '');
+	return host === domain || host.endsWith(`.${domain}`);
+}
+
+export function domainOf(rawUrl: string): string | undefined {
+	try {
+		return new URL(rawUrl).hostname.replace(/^www\./, '');
+	} catch {
+		return undefined;
+	}
+}
+
 export function currentTabUrl(): Promise<string | undefined> {
 	return chrome.tabs
 		.query({ active: true, currentWindow: true })

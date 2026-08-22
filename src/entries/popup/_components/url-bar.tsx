@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { currentTabUrl, normalizeUrlKey } from '@/lib/url-utils';
+import {
+	currentTabUrl,
+	domainOf,
+	hostMatchesDomain,
+	normalizeUrlKey,
+} from '@/lib/url-utils';
 import { cn } from '@/lib/utils';
 
 const URL_LIST_KEY = 'urlList';
@@ -28,38 +33,37 @@ export function useUrlSelection(currentDomain?: string): {
 	const [urlKeys, setUrlKeys] = useState<string[]>([]);
 	const [selected, setSelected] = useState<string>();
 
-	// INFO: Load the full list, then show only keys under the current tab's
-	// domain. Storage keeps every key so other domains stay configured.
+	// INFO: Load the full list, then show ONLY keys under the current tab's
+	// registrable domain (gist.github.com counts as github.com). Storage keeps
+	// every key so other domains stay configured; switching tabs re-filters on
+	// next popup open.
 	useEffect(() => {
+		let cancelled = false;
 		void (async () => {
 			const [keys, active] = await Promise.all([
 				loadUrlList(),
 				currentTabUrl(),
 			]);
-			setUrlKeys(keys);
+			if (cancelled) return;
 
-			let domain = currentDomain;
-			if (!domain && active) {
-				try {
-					domain = new URL(active).hostname.replace(/^www\./, '');
-				} catch {
-					domain = undefined;
-				}
-			}
-
+			const domain = currentDomain ?? domainOf(active ?? '');
 			const visible =
 				domain === undefined
 					? keys
 					: keys.filter((key) => {
 							try {
-								return new URL(key).hostname.replace(/^www\./, '') === domain;
+								return hostMatchesDomain(new URL(key).hostname, domain);
 							} catch {
 								return true;
 							}
 						});
 
+			setUrlKeys(visible);
 			if (visible.length > 0) setSelected((prev) => prev ?? visible[0]);
 		})();
+		return () => {
+			cancelled = true;
+		};
 	}, [currentDomain]);
 
 	const select = useCallback((key: string) => setSelected(key), []);
