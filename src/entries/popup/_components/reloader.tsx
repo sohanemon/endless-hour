@@ -3,6 +3,8 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { FeatureStatusBadge } from '@/entries/popup/_components/feature-status-badge';
+import { useFeatureStatus } from '@/hooks/use-feature-status';
 import { sendMessage } from '@/lib/messaging';
 import { resolveBypassCache } from '@/lib/reload-utils';
 import { tabsForUrlKey } from '@/lib/url-utils';
@@ -34,6 +36,7 @@ export default function Reloader({ urlKey }: ReloaderProps) {
 	const [config, setConfig] = useState<AutoReloadConfig>(DEFAULT_CONFIG);
 	const [lastReloadedAt, setLastReloadedAt] = useState<number>();
 	const [now, setNow] = useState(Date.now());
+	const status = useFeatureStatus('GET_AUTO_RELOAD_STATUS', urlKey);
 
 	const refresh = useCallback(async (key: string) => {
 		const info = await sendMessage<'GET_AUTO_RELOAD'>({
@@ -94,6 +97,14 @@ export default function Reloader({ urlKey }: ReloaderProps) {
 	return (
 		<div className="flex flex-col gap-6">
 			<div className="flex flex-col gap-1">
+				<FeatureStatusBadge
+					status={status}
+					copy={{
+						running: 'Auto-reload is running',
+						idle: 'Armed — no matching tab open',
+						stopped: 'Stopped',
+					}}
+				/>
 				<p className="text-xs text-muted-foreground">
 					{lastReloadedAt
 						? `Last reloaded ${formatAgo(lastReloadedAt, now)}`

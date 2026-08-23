@@ -1,3 +1,5 @@
+import type { FeatureStatusResponse } from '../lib/feature-status';
+
 export interface AutoReloadConfig {
 	min: number;
 	max: number;
@@ -62,6 +64,8 @@ export interface MessageMap {
 		actions: BehaviorAction[];
 		clickSelectors: string[];
 	};
+	GET_AUTO_RELOAD_STATUS: { type: 'GET_AUTO_RELOAD_STATUS'; urlKey: string };
+	GET_BEHAVIOR_STATUS: { type: 'GET_BEHAVIOR_STATUS'; urlKey: string };
 }
 export type MessageType = keyof MessageMap;
 export type Message<T extends MessageType> = MessageMap[T];
@@ -81,4 +85,6 @@ export interface ResponseMap {
 	GET_BEHAVIOR: { config: BehaviorConfig | undefined };
 	BEHAVIOR_TARGET: { ok: boolean; target?: BehaviorTarget };
 	CLEAR_ALL_STORAGE: { ok: boolean };
+	GET_AUTO_RELOAD_STATUS: FeatureStatusResponse;
+	GET_BEHAVIOR_STATUS: FeatureStatusResponse;
 }

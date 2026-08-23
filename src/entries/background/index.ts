@@ -1,10 +1,12 @@
 import {
+	getAllAutoReloadConfigs,
 	getAutoReloadConfig,
 	getLastReloadedAt,
 	setAutoReloadConfig,
 	setLastReloadedAt,
 } from '../../lib/auto-reload.store.ts';
 import {
+	getAllBehaviorConfigs,
 	getBehaviorConfig,
 	setBehaviorConfig,
 } from '../../lib/behavior.store.ts';
@@ -15,6 +17,7 @@ import {
 	performHover,
 	performScroll,
 } from '../../lib/cdp-input.ts';
+import type { FeatureStatusResponse } from '../../lib/feature-status';
 import { onMessage, sendTabMessage } from '../../lib/messaging';
 import { resolveBypassCache } from '../../lib/reload-utils.ts';
 import { URL_LIST_KEY } from '../../lib/storage-keys.ts';
@@ -24,8 +27,16 @@ import type { BehaviorConfig } from '../../types/messages.types';
 // --- URL-keyed alarms ---
 // One alarm per URL key per feature. On each tick the background resolves
 // every open tab whose normalized URL matches and drives them all.
-const autoReloadAlarmName = (urlKey: string) => `autoReload:${urlKey}`;
+
+// INFO: The popup can only tell "running" from "stopped" by checking whether
+// the feature's next-tick alarm actually exists — storage survives browser
+// restarts, the alarm chain does not. Exported via GET_*_STATUS messages.
+function getAlarm(name: string): Promise<chrome.alarms.Alarm | undefined> {
+	return chrome.alarms.get(name);
+}
+
 const behaviorAlarmName = (urlKey: string) => `behavior:${urlKey}`;
+const autoReloadAlarmName = (urlKey: string) => `autoReload:${urlKey}`;
 
 function randomDelaySeconds(min: number, max: number): number {
 	return Math.random() * (max - min) + min;
@@ -122,6 +133,30 @@ onMessage(async (message) => {
 		return { ok: true };
 	}
 
+	if (
+		message.type === 'GET_AUTO_RELOAD_STATUS' ||
+		message.type === 'GET_BEHAVIOR_STATUS'
+	) {
+		// INFO: Both features share the same status shape: armed flag, whether
+		// the next-tick alarm actually exists, and how many open tabs currently
+		// match. The popup derives running/idle/stopped from these three facts.
+		const config =
+			message.type === 'GET_AUTO_RELOAD_STATUS'
+				? await getAutoReloadConfig(message.urlKey)
+				: await getBehaviorConfig(message.urlKey);
+		const alarm = await getAlarm(
+			message.type === 'GET_AUTO_RELOAD_STATUS'
+				? autoReloadAlarmName(message.urlKey)
+				: behaviorAlarmName(message.urlKey),
+		);
+		const enabled = Boolean(config?.enabled);
+		return {
+			enabled,
+			alarmScheduled: alarm != null,
+			liveTabCount: enabled ? (await tabsForUrlKey(message.urlKey)).length : 0,
+		} satisfies FeatureStatusResponse;
+	}
+
 	if (message.type === 'GET_BEHAVIOR') {
 		const config = await getBehaviorConfig(message.urlKey);
 		return { config };
@@ -210,9 +245,44 @@ async function runBehaviorTick(urlKey: string): Promise<void> {
 // detachAllBehaviors() here — the worker wakes on every alarm tick and must
 // not tear down live debugger sessions; attach() tolerates re-attach instead.
 chrome.runtime.onStartup.addListener(() => {
+	void reconcileAlarms();
 	void purgeLegacyTabKeys();
 });
+void reconcileAlarms();
 void purgeLegacyTabKeys();
+
+// INFO: chrome.alarms "generally persist" across browser restarts but the
+// docs explicitly do not guarantee it; when they are lost, an enabled config
+// sits armed with no next tick forever — the exact dead state the popup's
+// status query exposes. Reconcile on every worker cold start: re-arm any
+// enabled config whose alarm is missing (covers browser restart, extension
+// reload, and SW eviction edge cases alike).
+async function reconcileAlarms(): Promise<void> {
+	try {
+		const [reloadConfigs, behaviorConfigs] = await Promise.all([
+			getAllAutoReloadConfigs(),
+			getAllBehaviorConfigs(),
+		]);
+		await Promise.all([
+			...reloadConfigs
+				.filter((entry) => entry.config.enabled)
+				.map(async (entry) => {
+					if ((await getAlarm(autoReloadAlarmName(entry.urlKey))) != null)
+						return;
+					await scheduleNext(entry.urlKey, entry.config);
+				}),
+			...behaviorConfigs
+				.filter((entry) => entry.config.enabled)
+				.map(async (entry) => {
+					if ((await getAlarm(behaviorAlarmName(entry.urlKey))) != null) return;
+					await scheduleNextBehavior(entry.urlKey, entry.config);
+				}),
+		]);
+	} catch {
+		// Transient storage failure: the popup status readout still reports
+		// the gap honestly; reconciliation retries on next worker start.
+	}
+}
 
 async function purgeLegacyTabKeys(): Promise<void> {
 	const all = await chrome.storage.local.get(null);

@@ -1,11 +1,12 @@
-// entries/popup/_components/behavior.tsx
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useFeatureStatus } from '@/hooks/use-feature-status';
 import { sendMessage } from '@/lib/messaging';
 import type { BehaviorConfig } from '@/types/messages.types';
+import { FeatureStatusBadge } from './feature-status-badge';
 
 const DEFAULT_CONFIG: BehaviorConfig = {
 	enabled: false,
@@ -24,6 +25,7 @@ interface BehaviorProps {
 export default function Behavior({ urlKey }: BehaviorProps) {
 	const [config, setConfig] = useState<BehaviorConfig>(DEFAULT_CONFIG);
 	const [newSelector, setNewSelector] = useState('');
+	const status = useFeatureStatus('GET_BEHAVIOR_STATUS', urlKey);
 
 	const refresh = useCallback(async (key: string) => {
 		const info = await sendMessage<'GET_BEHAVIOR'>({
@@ -76,6 +78,14 @@ export default function Behavior({ urlKey }: BehaviorProps) {
 
 	return (
 		<div className="flex flex-col gap-4">
+			<FeatureStatusBadge
+				status={status}
+				copy={{
+					running: 'Behavior is running',
+					idle: 'Armed — no matching tab open',
+					stopped: 'Stopped',
+				}}
+			/>
 			<div className="flex flex-col gap-2">
 				<p className="text-xs font-medium">Actions</p>
 				<div className="flex items-center gap-2">
